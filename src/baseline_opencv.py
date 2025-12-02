@@ -1,14 +1,8 @@
-import numpy as np
-import cv2
-
 import math
-import pyautogui
 
-# Gesture‑to‑Action mapping: palm → jump, fist → duck, peace → neutral
-# We classify based purely on convexity defects count:
-#   count_defects >= 4 → palm (jump)
-#   count_defects <= 1 → fist (duck)
-#   otherwise → peace (neutral)
+import cv2
+import numpy as np
+import pyautogui
 
 # Open Camera
 capture = cv2.VideoCapture(0)
@@ -41,10 +35,12 @@ while capture.isOpened():
     # Apply Gaussian Blur and Threshold
     filtered = cv2.GaussianBlur(erosion, (3, 3), 0)
     ret, thresh = cv2.threshold(filtered, 127, 255, 0)
-#####
+    #####
     # Find contours
-    #image, contours, hierarchy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    contours, hierachy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    # image, contours, hierarchy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    contours, hierachy = cv2.findContours(
+        thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
+    )
 
     try:
         # Find contour with maximum area
@@ -79,7 +75,7 @@ while capture.isOpened():
             a = math.sqrt((end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2)
             b = math.sqrt((far[0] - start[0]) ** 2 + (far[1] - start[1]) ** 2)
             c = math.sqrt((end[0] - far[0]) ** 2 + (end[1] - far[1]) ** 2)
-            angle = (math.acos((b ** 2 + c ** 2 - a ** 2) / (2 * b * c)) * 180) / 3.14
+            angle = (math.acos((b**2 + c**2 - a**2) / (2 * b * c)) * 180) / 3.14
 
             # if angle >= 90 draw a circle at the far point
             if angle <= 90:
@@ -90,37 +86,11 @@ while capture.isOpened():
 
         # Press SPACE if condition is match
 
-        # Decide gesture → action mapping
-        action = None
         if count_defects >= 4:
-            gesture = "palm"         # open hand
-            action   = "jump"
-        elif count_defects <= 1:
-            gesture = "fist"         # closed hand
-            action   = "duck"
-        else:
-            gesture = "peace"        # anything else
-            action   = "neutral"
+            pyautogui.press("space")
+            cv2.putText(frame, "JUMP", (115, 80), cv2.FONT_HERSHEY_SIMPLEX, 2, 2, 2)
 
-        # Print/log for debugging
-        print(f"Detected gesture={gesture}, defects={count_defects}, action={action}")
-
-        # Trigger game keystroke
-        if action == "jump":
-            pyautogui.press('space')
-            cv2.putText(frame, "JUMP", (115, 80), cv2.FONT_HERSHEY_SIMPLEX, 2, (0,255,0), 2)
-        elif action == "duck":
-            # hold down arrow key briefly for duck
-            pyautogui.keyDown('down')
-            cv2.putText(frame, "DUCK", (115, 80), cv2.FONT_HERSHEY_SIMPLEX, 2, (0,255,0), 2)
-            # you might add a small sleep to press down then release:
-            # time.sleep(0.1)
-            pyautogui.keyUp('down')
-        else:
-            # neutral: no keypress
-            cv2.putText(frame, "NEUTRAL", (115, 80), cv2.FONT_HERSHEY_SIMPLEX, 2, (0,255,0), 2)
-
-        #PLAY RACING GAMES (WASD)
+        # PLAY RACING GAMES (WASD)
         """
         if count_defects == 1:
             pyautogui.press('w')
@@ -146,7 +116,7 @@ while capture.isOpened():
     cv2.imshow("Gesture", frame)
 
     # Close the camera if 'q' is pressed
-    if cv2.waitKey(1) == ord('q'):
+    if cv2.waitKey(1) == ord("q"):
         break
 
 capture.release()
