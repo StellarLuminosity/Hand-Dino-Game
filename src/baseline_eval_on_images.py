@@ -1,50 +1,176 @@
-# pseudo-structure you can paste into a file
 from pathlib import Path
-import cv2, numpy as np
+import argparse
+import json
 
-CLASSES = ["palm","fist","peace"]
-VAL_DIR = Path("data/val")
+import cv2
+import numpy as np
+
+# Classes we care about (must match your folder names under data/)
+CLASSES = ["palm", "fist", "peace"]
+
 
 def predict_one(img_bgr):
-    # 1) preprocess
-    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
-    # basic skin mask (tweak quickly per your lighting)
-    mask = cv2.inRange(hsv, (0, 30, 60), (20, 170, 255))
+    """
+    Very simple OpenCV baseline:
+    - convert to HSV
+    - threshold for skin
+    - largest contour -> convex hull -> convexity defects
+    - use #defects as proxy for finger count
+    """
+
+    if img_bgr is None:
+        return "peace"  # safe fallback
+
+    # 1) Preprocess
+    img = cv2.GaussianBlur(img_bgr, (5, 5), 0)
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+    # crude skin color range; you can tweak later for better performance
+    lower = np.array([0, 30, 60], dtype=np.uint8)
+    upper = np.array([20, 170, 255], dtype=np.uint8)
+    mask = cv2.inRange(hsv, lower, upper)
+
+    # clean up mask
     mask = cv2.medianBlur(mask, 7)
+    kernel = np.ones((5, 5), np.uint8)
+    mask = cv2.dilate(mask, kernel, iterations=1)
+    mask = cv2.erode(mask, kernel, iterations=1)
 
-    # 2) largest contour
-    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not cnts: return "peace"  # empty → neutral fallback
-    c = max(cnts, key=cv2.contourArea)
+    # 2) Largest contour
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
+                                   cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        # no hand found → call it neutral
+        return "peace"
 
-    # 3) convex hull + defects
-    hull = cv2.convexHull(c, returnPoints=False)
-    if hull is None or len(hull) < 3:  # degenerate
-        return "fist"
+    contour = max(contours, key=cv2.contourArea)
+    if cv2.contourArea(contour) < 500:  # very small blob → probably noise
+        return "peace"
 
-    defects = cv2.convexityDefects(c, hull)
-    num_def = 0 if defects is None else defects.shape[0]
+    # 3) Convex hull + defects
+    hull = cv2.convexHull(contour, returnPoints=False)
+    if hull is None or len(hull) < 3:
+        return "fist"  # degenerate hull → treat as closed
 
-    # 4) tiny rule-of-thumb (adjust quickly):
-    if num_def >= 3:  return "palm"   # open hand → jump
-    if num_def <= 1:  return "fist"   # closed → duck
-    return "peace"                    # otherwise neutral
-    # See OpenCV convexity defects tutorial for rationale. 
+    defects = cv2.convexityDefects(contour, hull)
+    if defects is None:
+        num_defects = 0
+    else:
+        num_defects = defects.shape[0]
 
-def eval_folder():
-    correct = total = 0
-    per_class = {k:[0,0] for k in CLASSES}  # [correct, total]
+    # 4) Rule-of-thumb mapping:
+    #    more defects → more spread fingers (palm)
+    if num_defects >= 3:
+        return "palm"   # open hand
+    elif num_defects <= 1:
+        return "fist"   # closed hand
+    else:
+        return "peace"  # in-between → peace / neutral
+
+
+def eval_split(split_root: Path):
+    """
+    Evaluate baseline on a folder like data/val with subfolders:
+      data/val/palm, data/val/fist, data/val/peace
+    """
+    exts = {".jpg", ".jpeg", ".png"}
+    total = 0
+    total_correct = 0
+
+    per_class = {
+        cname: {"correct": 0, "total": 0}
+        for cname in CLASSES
+    }
+
     for cname in CLASSES:
-        for p in (VAL_DIR/cname).glob("*"):
-            img = cv2.imread(str(p))
-            if img is None: continue
+        class_dir = split_root / cname
+        if not class_dir.exists():
+            print(f"[WARN] Missing folder: {class_dir} (skipping)")
+            continue
+
+        for img_path in class_dir.iterdir():
+            if img_path.suffix.lower() not in exts:
+                continue
+
+            img = cv2.imread(str(img_path))
+            if img is None:
+                print(f"[WARN] Cannot read {img_path}, skipping")
+                continue
+
             pred = predict_one(img)
-            correct += int(pred == cname); total += 1
-            pc = per_class[cname]; pc[0]+=int(pred==cname); pc[1]+=1
-    acc = correct/total if total else 0.0
-    print(f"baseline val-acc: {acc:.3f}")
-    for cname,(ok,tot) in per_class.items():
-        print(f"{cname}: {ok}/{tot} = {ok/max(1,tot):.3f}")
+            total += 1
+            per_class[cname]["total"] += 1
+
+            if pred == cname:
+                total_correct += 1
+                per_class[cname]["correct"] += 1
+
+    if total == 0:
+        print("No images found – check your data path / split.")
+        return 0.0, per_class
+
+    overall_acc = total_correct / total
+
+    print(f"\n=== Baseline evaluation on: {split_root} ===")
+    print(f"Overall accuracy: {overall_acc:.3f} ({total_correct}/{total})")
+
+    for cname, stats in per_class.items():
+        if stats["total"] == 0:
+            print(f"{cname:>6}: no samples")
+        else:
+            acc = stats["correct"] / stats["total"]
+            print(
+                f"{cname:>6}: {acc:.3f} "
+                f"({stats['correct']}/{stats['total']})"
+            )
+
+    return overall_acc, per_class
+
+
+def save_metrics_json(overall_acc, per_class, out_path: Path):
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "overall_accuracy": overall_acc,
+        "per_class": per_class,
+    }
+    with out_path.open("w") as f:
+        json.dump(payload, f, indent=2)
+    print(f"\nSaved metrics to {out_path}")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--data_root",
+        type=str,
+        default="data",
+        help="Root folder with train/val/test subfolders",
+    )
+    parser.add_argument(
+        "--split",
+        type=str,
+        default="val",
+        choices=["train", "val", "test"],
+        help="Which split to evaluate on",
+    )
+    parser.add_argument(
+        "--out_json",
+        type=str,
+        default="figs/baseline_metrics.json",
+        help="Where to save metrics JSON",
+    )
+    args = parser.parse_args()
+
+    split_root = Path(args.data_root) / args.split
+    if not split_root.exists():
+        raise FileNotFoundError(
+            f"Split path {split_root} does not exist. "
+            "Did you run preprocess_dataset.py?"
+        )
+
+    overall_acc, per_class = eval_split(split_root)
+    save_metrics_json(overall_acc, per_class, Path(args.out_json))
+
 
 if __name__ == "__main__":
-    eval_folder()
+    main()

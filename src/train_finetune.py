@@ -72,7 +72,6 @@ def get_dataloaders(data_root: str, batch_size: int = 64, num_workers: int = 4):
             "but one or both do not exist. Did you run preprocess_dataset.py?"
         )
 
-    # Transform: resize to 64x64 and convert to tensor in [0,1]
     train_transform = transforms.Compose(
         [
             transforms.Resize((64, 64)),
