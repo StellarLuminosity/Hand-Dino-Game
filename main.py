@@ -2,9 +2,14 @@
 # main.py
 
 import random
+from pathlib import Path
 
 import cv2
 import numpy as np
+
+from src.baseline_eval_on_images import eval_split, save_metrics_json
+from src.preprocess_dataset import preprocess_dataset
+from src.train import train_model
 
 # ========== CONFIGURATION ==========
 
@@ -29,12 +34,7 @@ METRICS_OUTPUT = "figs/baseline_metrics.json"
 random.seed(42)
 
 
-# ========== MAIN FUNCTIONS ==========
-
-
-def preprocess():
-    """Download and preprocess the HaGRID dataset."""
-    from src.preprocess import preprocess_dataset
+def main():
 
     preprocess_dataset(
         dataset_name=DATASET_NAME,
@@ -43,11 +43,6 @@ def preprocess():
         force_redownload=False,
         cleanup_raw=False,
     )
-
-
-def train():
-    """Train the CNN model."""
-    from src.train import train_model
 
     train_model(
         data_root=DATA_DIR,
@@ -59,13 +54,6 @@ def train():
         output_dir=OUTPUT_DIR,
         device=DEVICE,
     )
-
-
-def evaluate_baseline():
-    """Evaluate OpenCV baseline on validation set."""
-    from pathlib import Path
-
-    from src.baseline_eval_on_images import eval_split, save_metrics_json
 
     split_root = Path(DATA_DIR) / EVAL_SPLIT
     if not split_root.exists():
@@ -80,10 +68,4 @@ def evaluate_baseline():
 # ========== RUN ==========
 
 if __name__ == "__main__":
-    # Uncomment the function you want to run:
-
-    # preprocess()
-    # train()
-    # evaluate_baseline()
-
-    pass
+    main()
