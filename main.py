@@ -2,6 +2,8 @@
 # main.py
 
 import json
+import os
+import torch
 import random
 from pathlib import Path
 
@@ -35,7 +37,11 @@ def main():
         max_val_batches=None,
     )
 
-    # Final evaluation
+    print("Final evaluation...")
+    model = HandGestureCNN(num_classes=num_classes).to(device) # re-initialize model so that we can evaluate the best one
+    ckpt_path = os.path.join(config.output_dir, "best_model.pt")
+    ckpt = torch.load(ckpt_path, map_location=device)
+    model.load_state_dict(ckpt["model_state_dict"])
     test_loss, test_acc, per_class_acc, confusion = evaluate(
         model, test_loader, device, max_batches=None
     )
