@@ -1,3 +1,5 @@
+# src/preprocess.py
+
 import os
 import random
 import shutil
@@ -5,40 +7,61 @@ from pathlib import Path
 
 from kaggle.api.kaggle_api_extended import KaggleApi
 
-# Configuration
-DATASET_NAME = "innominate817/hagrid-sample-30k-384p"
-TARGET_CLASSES = ["palm", "peace", "fist"]
-SPLIT_RATIOS = {"train": 0.7, "test": 0.15, "val": 0.15}
-DATA_DIR = Path("data")
-RAW_DATA_DIR = DATA_DIR / "raw"
-DOWNLOAD_DIR = RAW_DATA_DIR / "hagrid-sample-30k-384p"
 
+def preprocess_dataset(
+    dataset_name: str = "innominate817/hagrid-sample-30k-384p",
+    target_classes: list = None,
+    split_ratios: dict = None,
+    data_dir: str = "data",
+    force_redownload: bool = False,
+    cleanup_raw: bool = False,
+):
+    """
+    Download and preprocess the HaGRID dataset from Kaggle.
 
-def download_dataset():
-    """Download the HaGRID dataset from Kaggle."""
-    print("Downloading dataset from Kaggle...")
+    Args:
+        dataset_name: Kaggle dataset identifier
+        target_classes: List of gesture classes to include (default: ["palm", "peace", "fist"])
+        split_ratios: Dict with train/test/val ratios (default: {"train": 0.7, "test": 0.15, "val": 0.15})
+        data_dir: Root directory for processed data
+        force_redownload: If True, re-download even if data exists
+        cleanup_raw: If True, remove raw downloaded data after processing
+    """
+    if target_classes is None:
+        target_classes = ["palm", "peace", "fist"]
 
-    # Initialize Kaggle API
-    api = KaggleApi()
-    api.authenticate()
+    if split_ratios is None:
+        split_ratios = {"train": 0.7, "test": 0.15, "val": 0.15}
 
-    RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    api.dataset_download_files(DATASET_NAME, path=str(RAW_DATA_DIR), unzip=True)
+    data_dir = Path(data_dir)
+    raw_data_dir = data_dir / "raw"
+    download_dir = raw_data_dir / "hagrid-sample-30k-384p"
 
-    print(f"Dataset downloaded to {DOWNLOAD_DIR}")
+    # Download dataset
+    if not download_dir.exists() or force_redownload:
+        if force_redownload and raw_data_dir.exists():
+            shutil.rmtree(raw_data_dir)
 
+        print("Downloading dataset from Kaggle...")
+        api = KaggleApi()
+        api.authenticate()
 
-def filter_and_split():
-    """Filter dataset to target classes and split into train/test/val."""
+        raw_data_dir.mkdir(parents=True, exist_ok=True)
+        api.dataset_download_files(dataset_name, path=str(raw_data_dir), unzip=True)
+        print(f"Dataset downloaded to {download_dir}")
+    else:
+        print(f"Dataset already exists at {download_dir}")
+
+    # Filter and split
     print("Filtering and splitting dataset...")
 
-    images_root = DOWNLOAD_DIR / "hagrid_30k"
+    images_root = download_dir / "hagrid_30k"
     if not images_root.exists():
         raise FileNotFoundError(f"Expected images under {images_root}")
 
     # Match folders like train_val_palm, train_val_peace, train_val_fist
     class_dirs = []
-    for cname in TARGET_CLASSES:
+    for cname in target_classes:
         d = images_root / f"train_val_{cname}"
         if d.exists() and d.is_dir():
             class_dirs.append(d)
@@ -47,13 +70,13 @@ def filter_and_split():
 
     if not class_dirs:
         raise ValueError(
-            f"None of the target classes {TARGET_CLASSES} were found under {images_root}"
+            f"None of the target classes {target_classes} were found under {images_root}"
         )
 
     # Create output directories
-    for split in SPLIT_RATIOS.keys():
-        for cname in TARGET_CLASSES:
-            (DATA_DIR / split / cname).mkdir(parents=True, exist_ok=True)
+    for split in split_ratios.keys():
+        for cname in target_classes:
+            (data_dir / split / cname).mkdir(parents=True, exist_ok=True)
 
     exts = {".jpg", ".jpeg", ".png"}
 
@@ -77,8 +100,8 @@ def filter_and_split():
 
         rng.shuffle(image_files)
         total = len(image_files)
-        train_end = int(total * SPLIT_RATIOS["train"])
-        test_end = train_end + int(total * SPLIT_RATIOS["test"])
+        train_end = int(total * split_ratios["train"])
+        test_end = train_end + int(total * split_ratios["test"])
 
         splits = {
             "train": image_files[:train_end],
@@ -87,44 +110,20 @@ def filter_and_split():
         }
 
         for split_name, files in splits.items():
-            dest_dir = DATA_DIR / split_name / cname
+            dest_dir = data_dir / split_name / cname
             for src in files:
                 shutil.copy2(src, dest_dir / src.name)
             print(f"  {split_name}: {len(files)} images")
 
     print("\nDataset preprocessing complete!")
-    print(f"Data organized in: {DATA_DIR}")
-    for split in SPLIT_RATIOS.keys():
-        print(f"  {DATA_DIR / split}/")
-        for cname in TARGET_CLASSES:
-            count = len(list((DATA_DIR / split / cname).glob("*")))
+    print(f"Data organized in: {data_dir}")
+    for split in split_ratios.keys():
+        print(f"  {data_dir / split}/")
+        for cname in target_classes:
+            count = len(list((data_dir / split / cname).glob("*")))
             print(f"    {cname}/ ({count} images)")
 
-
-def cleanup_raw_data():
-    """Optionally remove raw downloaded data to save space."""
-    response = input("\nRemove raw downloaded data? (y/n): ").strip().lower()
-    if response == "y":
-        shutil.rmtree(RAW_DATA_DIR)
-        print("Raw data removed.")
-
-
-if __name__ == "__main__":
-    # Set random seed for reproducibility
-    random.seed(42)
-
-    # Check if dataset already downloaded
-    if not DOWNLOAD_DIR.exists():
-        download_dataset()
-    else:
-        print(f"Dataset already exists at {DOWNLOAD_DIR}")
-        response = input("Re-download? (y/n): ").strip().lower()
-        if response == "y":
-            shutil.rmtree(RAW_DATA_DIR)
-            download_dataset()
-
-    # Filter and split
-    filter_and_split()
-
     # Optional cleanup
-    cleanup_raw_data()
+    if cleanup_raw and raw_data_dir.exists():
+        shutil.rmtree(raw_data_dir)
+        print("\nRaw data removed.")
