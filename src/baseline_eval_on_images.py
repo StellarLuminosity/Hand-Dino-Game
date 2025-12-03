@@ -1,9 +1,10 @@
-from pathlib import Path
 import argparse
 import json
+from pathlib import Path
 
 import cv2
 import numpy as np
+
 import config
 
 CLASSES = config.target_classes
@@ -15,7 +16,7 @@ def predict_one(img_bgr):
     - convert to HSV
     - threshold for skin
     - largest contour -> convex hull -> convexity defects
-    - use #defects as proxy for finger count
+    - use # of defects as proxy for finger count
     """
 
     if img_bgr is None:
@@ -37,8 +38,7 @@ def predict_one(img_bgr):
     mask = cv2.erode(mask, kernel, iterations=1)
 
     # 2) Largest contour
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
-                                   cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         # no hand found → call it neutral
         return "peace"
@@ -60,9 +60,9 @@ def predict_one(img_bgr):
 
     # more defects --> more spread fingers (palm)
     if num_defects >= 3:
-        return "palm"   # open hand
+        return "palm"  # open hand
     elif num_defects <= 1:
-        return "fist"   # closed hand
+        return "fist"  # closed hand
     else:
         return "peace"  # in-between → peace / neutral
 
@@ -75,10 +75,7 @@ def eval_split(split_root: Path):
     total = 0
     total_correct = 0
 
-    per_class = {
-        cname: {"correct": 0, "total": 0}
-        for cname in CLASSES
-    }
+    per_class = {cname: {"correct": 0, "total": 0} for cname in CLASSES}
 
     for cname in CLASSES:
         class_dir = split_root / cname
@@ -117,10 +114,7 @@ def eval_split(split_root: Path):
             print(f"{cname:>6}: no samples")
         else:
             acc = stats["correct"] / stats["total"]
-            print(
-                f"{cname:>6}: {acc:.3f} "
-                f"({stats['correct']}/{stats['total']})"
-            )
+            print(f"{cname:>6}: {acc:.3f} " f"({stats['correct']}/{stats['total']})")
 
     return overall_acc, per_class
 

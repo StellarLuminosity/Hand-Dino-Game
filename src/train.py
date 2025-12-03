@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 
 import config
+
 from .hagrid_dataset import HagridBBoxImageFolder
 from .model import HandGestureCNN
 
@@ -139,7 +140,7 @@ def train_model():
     epochs = config.epochs
     learning_rate = config.learning_rate
     output_dir = config.output_dir
-    
+
     print(f"Using device: {device}")
 
     train_loader, val_loader, class_to_idx = get_dataloaders()

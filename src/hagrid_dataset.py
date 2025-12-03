@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
+import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
@@ -159,34 +162,3 @@ class HagridBBoxImageFolder(Dataset):
             img = self.transform(img)
 
         return img, label_idx
-
-
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    from torchvision import transforms
-
-    import config
-
-    transform = transforms.Compose(
-        [
-            transforms.Resize(config.image_size),
-            transforms.ToTensor(),
-        ]
-    )
-
-    ds = HagridBBoxImageFolder(
-        root=Path(config.data_dir) / "train",
-        annotations_path=config.annotations_path,
-        transform=transform,
-    )
-
-    print("Dataset size:", len(ds))
-    print("Classes:", ds.classes)
-
-    for i in range(6):
-        img, label_idx = ds[i]
-        img_np = img.permute(1, 2, 0).numpy()
-        plt.imshow(img_np)
-        plt.title(f"{ds.classes[label_idx]}")
-        plt.axis("off")
-        plt.show()
