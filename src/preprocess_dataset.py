@@ -13,7 +13,6 @@ def preprocess_dataset(
     target_classes: list = None,
     split_ratios: dict = None,
     data_dir: str = "data",
-    force_redownload: bool = False,
     cleanup_raw: bool = False,
 ):
     """
@@ -24,7 +23,6 @@ def preprocess_dataset(
         target_classes: List of gesture classes to include (default: ["palm", "peace", "fist"])
         split_ratios: Dict with train/test/val ratios (default: {"train": 0.7, "test": 0.15, "val": 0.15})
         data_dir: Root directory for processed data
-        force_redownload: If True, re-download even if data exists
         cleanup_raw: If True, remove raw downloaded data after processing
     """
     if target_classes is None:
@@ -37,11 +35,8 @@ def preprocess_dataset(
     raw_data_dir = data_dir / "raw"
     download_dir = raw_data_dir / "hagrid-sample-30k-384p"
 
-    # Download dataset
-    if not download_dir.exists() or force_redownload:
-        if force_redownload and raw_data_dir.exists():
-            shutil.rmtree(raw_data_dir)
-
+    # Download dataset (only if not already downloaded)
+    if not download_dir.exists():
         print("Downloading dataset from Kaggle...")
         api = KaggleApi()
         api.authenticate()

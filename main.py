@@ -40,7 +40,6 @@ def main():
         dataset_name=DATASET_NAME,
         target_classes=TARGET_CLASSES,
         data_dir=DATA_DIR,
-        force_redownload=False,
         cleanup_raw=False,
     )
 
