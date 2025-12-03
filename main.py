@@ -14,9 +14,9 @@ from src.train import train_model
 
 
 def main():
+    # Note: run preprocess_dataset.py first
 
     random.seed(config.random_seed)
-    preprocess_dataset()
 
     train_model()
 
@@ -29,8 +29,6 @@ def main():
     overall_acc, per_class = eval_split(split_root)
     save_metrics_json(overall_acc, per_class, Path(config.metrics_output))
 
-
-# ========== RUN ==========
 
 if __name__ == "__main__":
     main()

@@ -6,31 +6,20 @@ from torch.utils.data import Dataset
 
 import config
 
-IMG_EXTENSIONS = config.img_extensions_torch
-
 
 class HagridBBoxImageFolder(Dataset):
     """
-    Custom dataset that crops images using HaGRID bounding boxes before applying transforms.
+    Dataset that crops images using HaGRID bounding boxes before applying transforms.
     """
 
-    def __init__(self, root, annotations_path, transform=None):
+    def __init__(self, root, transform=None):
         super().__init__()
         self.root = Path(root)
         self.transform = transform
 
-        if not self.root.exists():
-            raise FileNotFoundError(f"Dataset root '{self.root}' does not exist")
+        self.annotations = self._load_annotations()
 
-        self.annotations = self._load_annotations(annotations_path)
-
-        if not self.annotations:
-            raise FileNotFoundError(
-                f"No annotations found at '{annotations_path}'. "
-                "Please download them from the official repo and place here."
-            )
-
-        # Discover classes (subfolders)
+        # Discover classes from subfolders
         class_dirs = [d for d in sorted(self.root.iterdir()) if d.is_dir()]
         if not class_dirs:
             raise RuntimeError(f"No class subfolders found under '{self.root}'")
@@ -38,119 +27,87 @@ class HagridBBoxImageFolder(Dataset):
         self.classes = [d.name for d in class_dirs]
         self.class_to_idx = {cls_name: idx for idx, cls_name in enumerate(self.classes)}
 
-        # Build list of samples: (path, label_idx, bbox_norm)
+        # Build samples: (image_path, label_idx, bbox_normalized)
         self.samples = []
-        missing_ann = []
+        missing_count = 0
 
         for cls_name in self.classes:
             class_dir = self.root / cls_name
             label_idx = self.class_to_idx[cls_name]
 
             for img_path in sorted(class_dir.iterdir()):
-                if not img_path.is_file():
-                    continue
-                if img_path.suffix.lower() not in IMG_EXTENSIONS:
+                if not img_path.is_file() or img_path.suffix.lower() not in config.img_extensions_torch:
                     continue
 
-                key = img_path.stem  # image name without extension
+                key = img_path.stem  # image ID without extension
                 ann = self.annotations.get(key)
 
                 if ann is None:
-                    # Keep track of missing ones (useful debug)
-                    missing_ann.append(str(img_path))
+                    missing_count += 1
                     continue
 
-                bbox_norm = self._choose_bbox(ann)
-                self.samples.append((str(img_path), label_idx, bbox_norm))
+                bbox = self._get_bbox(ann)
+                self.samples.append((str(img_path), label_idx, bbox))
 
         if not self.samples:
             raise RuntimeError(
-                f"No samples built. Either there are no images under '{self.root}' "
-                f"or annotations did not match image filenames. "
-                f"Check that you pointed --annotations_path to HaGRID annotations "
-                f"and that filenames were preserved when preprocessing."
+                f"No samples found. Check that images and annotations match. "
+                f"Missing annotations for {missing_count} images."
             )
 
-        if missing_ann:
-            # Only warn; if you want hard fail, raise instead.
-            print(
-                f"[WARN] {len(missing_ann)} images under '{self.root}' "
-                f"do not have bounding-box annotations. They were skipped."
-            )
+        if missing_count > 0:
+            print(f"[WARN] {missing_count} images missing annotations (skipped)")
 
-        print(
-            f"[INFO] HagridBBoxImageFolder at '{self.root}': "
-            f"{len(self.samples)} samples across {len(self.classes)} classes."
-        )
+        print(f"[INFO] Loaded {len(self.samples)} samples from {self.root}")
 
-    @staticmethod
-    def _load_annotations(annotations_path):
-        annotations_path = Path(annotations_path)
+    def _load_annotations(self):
+        """Load all annotation JSON files from annotations_path directory."""
+        annotations_path = Path(config.annotations_path)
+        if not annotations_path.exists():
+            raise FileNotFoundError(f"Annotations directory not found: {annotations_path}")
+
         annotations = {}
+        json_files = list(annotations_path.rglob("*.json"))
 
-        if annotations_path.is_file():
-            # Single JSON file
-            with open(annotations_path, "r") as f:
-                data = json.load(f)
-            for k, v in data.items():
-                annotations[str(k)] = v
-            print(
-                f"[INFO] Loaded {len(annotations)} annotations from '{annotations_path}'"
-            )
-        elif annotations_path.is_dir():
-            # Recursively load all JSON files under this directory
-            json_files = list(annotations_path.rglob("*.json"))
-            if not json_files:
-                raise FileNotFoundError(
-                    f"No JSON files found under annotations directory '{annotations_path}'"
-                )
+        if not json_files:
+            raise FileNotFoundError(f"No JSON files found in {annotations_path}")
 
-            for jf in json_files:
-                with open(jf, "r") as f:
-                    try:
-                        data = json.load(f)
-                    except json.JSONDecodeError as e:
-                        print(f"[WARN] Failed to parse '{jf}': {e}")
-                        continue
-                for k, v in data.items():
-                    key = str(k)
-                    # If the same key appears multiple times (train/val/test),
-                    # keep the first occurrence – they should be identical.
+        for json_file in json_files:
+            with open(json_file, "r") as f:
+                try:
+                    data = json.load(f)
+                except json.JSONDecodeError as e:
+                    print(f"[WARN] Failed to parse {json_file}: {e}")
+                    continue
+
+                for key, value in data.items():
+                    # Keep first occurrence if duplicate (shouldn't happen)
                     if key not in annotations:
-                        annotations[key] = v
+                        annotations[key] = value
 
-            print(
-                f"[INFO] Loaded {len(annotations)} annotations "
-                f"from directory '{annotations_path}' ({len(json_files)} JSON files)."
-            )
-        else:
-            raise FileNotFoundError(
-                f"annotations_path '{annotations_path}' is neither a file nor a directory"
-            )
-
+        print(f"[INFO] Loaded {len(annotations)} annotations from {len(json_files)} files")
         return annotations
 
     @staticmethod
-    def _choose_bbox(ann):
+    def _get_bbox(ann):
         """
-        Choose which bounding box to use from a HaGRID annotation entry.
-
-        Prefer united_bbox for two-handed gestures (if present and non-null),
-        otherwise fall back to the first bbox in 'bboxes'.
+        Extract bounding box from annotation.
         """
+        # Try united_bbox first (for multi-hand gestures)
         united = ann.get("united_bbox")
-        if isinstance(united, list) and len(united) > 0 and united[0] is not None:
+        if united and isinstance(united, list) and len(united) > 0 and united[0] is not None:
             bbox = united[0]
         else:
+            # Fall back to first bbox
             bboxes = ann.get("bboxes")
-            if not bboxes:
-                raise ValueError("Annotation entry has no 'bboxes' or 'united_bbox'")
+            if not bboxes or len(bboxes) == 0:
+                raise ValueError(f"Annotation has no valid bbox: {ann.keys()}")
             bbox = bboxes[0]
 
         if len(bbox) != 4:
-            raise ValueError(f"Expected bbox with 4 elements, got: {bbox}")
+            raise ValueError(f"Invalid bbox format: {bbox}")
 
-        return bbox  # normalized [x, y, w, h] in [0,1]
+        return bbox
 
     def __len__(self):
         return len(self.samples)
@@ -161,27 +118,27 @@ class HagridBBoxImageFolder(Dataset):
         img = Image.open(img_path).convert("RGB")
         w, h = img.size
 
-        x, y, bw, bh = bbox_norm
-        # Convert normalized coords to pixel coordinates
-        x1 = int(x * w)
-        y1 = int(y * h)
-        x2 = int((x + bw) * w)
-        y2 = int((y + bh) * h)
+        # Convert normalized bbox [x, y, w, h] to pixel coordinates
+        x_norm, y_norm, w_norm, h_norm = bbox_norm
+        x1 = int(x_norm * w)
+        y1 = int(y_norm * h)
+        x2 = int((x_norm + w_norm) * w)
+        y2 = int((y_norm + h_norm) * h)
 
-        # Add a small margin around the bbox
+        # Add 10% margin
+        margin = 0.1
         box_w = max(1, x2 - x1)
         box_h = max(1, y2 - y1)
-        dx = int(box_w * 0.1)
-        dy = int(box_h * 0.1)
+        dx = int(box_w * margin)
+        dy = int(box_h * margin)
 
         x1 = max(0, x1 - dx)
         y1 = max(0, y1 - dy)
         x2 = min(w, x2 + dx)
         y2 = min(h, y2 + dy)
 
-        # Safety check in case something went wrong
+        # Safety check
         if x2 <= x1 or y2 <= y1:
-            # Fallback to full image if bbox is degenerate
             x1, y1, x2, y2 = 0, 0, w, h
 
         img = img.crop((x1, y1, x2, y2))
@@ -190,3 +147,31 @@ class HagridBBoxImageFolder(Dataset):
             img = self.transform(img)
 
         return img, label_idx
+
+if __name__ == "__main__":
+    from torchvision import transforms
+    import matplotlib.pyplot as plt
+    import config
+
+    transform = transforms.Compose([
+        transforms.Resize(config.image_size),
+        transforms.ToTensor(),
+    ])
+
+    ds = HagridBBoxImageFolder(
+        root=Path(config.data_dir) / "train",
+        annotations_path=config.annotations_path,
+        transform=transform,
+    )
+
+    print("Dataset size:", len(ds))
+    print("Classes:", ds.classes)
+
+    for i in range(6):
+        img, label_idx = ds[i]
+        img_np = img.permute(1, 2, 0).numpy()
+        plt.imshow(img_np)
+        plt.title(f"{ds.classes[label_idx]}")
+        plt.axis("off")
+        plt.show()
+

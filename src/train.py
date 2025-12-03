@@ -17,20 +17,9 @@ from .model import HandGestureCNN
 
 def get_dataloaders():
     """
-    Builds train and validation dataloaders from data_root/{train,val}
-    using HagridBBoxImageFolder so that images are cropped with
-    HaGRID bounding boxes before being resized.
-
-    Assumes directory structure:
-      data_root/train/{class1,class2,...}
-      data_root/val/{class1,class2,...}
-
-    and annotations_path points to:
-      - A HaGRID annotations JSON file, or
-      - A directory like 'hagrid_annotations/' containing *.json files.
+    Builds train and validation dataloaders
     """
     data_root = Path(config.data_dir)
-    annotations_path = config.annotations_path
     batch_size = config.batch_size
     num_workers = config.num_workers
 
@@ -62,12 +51,10 @@ def get_dataloaders():
 
     train_dataset = HagridBBoxImageFolder(
         root=str(train_dir),
-        annotations_path=annotations_path,
         transform=train_transform,
     )
     val_dataset = HagridBBoxImageFolder(
         root=str(val_dir),
-        annotations_path=annotations_path,
         transform=val_transform,
     )
 
