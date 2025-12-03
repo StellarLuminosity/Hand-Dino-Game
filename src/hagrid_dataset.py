@@ -36,7 +36,10 @@ class HagridBBoxImageFolder(Dataset):
             label_idx = self.class_to_idx[cls_name]
 
             for img_path in sorted(class_dir.iterdir()):
-                if not img_path.is_file() or img_path.suffix.lower() not in config.img_extensions_torch:
+                if (
+                    not img_path.is_file()
+                    or img_path.suffix.lower() not in config.img_extensions_torch
+                ):
                     continue
 
                 key = img_path.stem  # image ID without extension
@@ -64,7 +67,9 @@ class HagridBBoxImageFolder(Dataset):
         """Load all annotation JSON files from annotations_path directory."""
         annotations_path = Path(config.annotations_path)
         if not annotations_path.exists():
-            raise FileNotFoundError(f"Annotations directory not found: {annotations_path}")
+            raise FileNotFoundError(
+                f"Annotations directory not found: {annotations_path}"
+            )
 
         annotations = {}
         json_files = list(annotations_path.rglob("*.json"))
@@ -85,19 +90,24 @@ class HagridBBoxImageFolder(Dataset):
                     if key not in annotations:
                         annotations[key] = value
 
-        print(f"[INFO] Loaded {len(annotations)} annotations from {len(json_files)} files")
+        print(
+            f"[INFO] Loaded {len(annotations)} annotations from {len(json_files)} files"
+        )
         return annotations
 
     @staticmethod
     def _get_bbox(ann):
         """
         Extract bounding box from annotation.
-        Prefer united_bbox if available, otherwise use first bbox.
-        Format: [x, y, w, h] normalized [0, 1]
         """
         # Try united_bbox first (for multi-hand gestures)
         united = ann.get("united_bbox")
-        if united and isinstance(united, list) and len(united) > 0 and united[0] is not None:
+        if (
+            united
+            and isinstance(united, list)
+            and len(united) > 0
+            and united[0] is not None
+        ):
             bbox = united[0]
         else:
             # Fall back to first bbox
@@ -149,3 +159,34 @@ class HagridBBoxImageFolder(Dataset):
             img = self.transform(img)
 
         return img, label_idx
+
+
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    from torchvision import transforms
+
+    import config
+
+    transform = transforms.Compose(
+        [
+            transforms.Resize(config.image_size),
+            transforms.ToTensor(),
+        ]
+    )
+
+    ds = HagridBBoxImageFolder(
+        root=Path(config.data_dir) / "train",
+        annotations_path=config.annotations_path,
+        transform=transform,
+    )
+
+    print("Dataset size:", len(ds))
+    print("Classes:", ds.classes)
+
+    for i in range(6):
+        img, label_idx = ds[i]
+        img_np = img.permute(1, 2, 0).numpy()
+        plt.imshow(img_np)
+        plt.title(f"{ds.classes[label_idx]}")
+        plt.axis("off")
+        plt.show()
