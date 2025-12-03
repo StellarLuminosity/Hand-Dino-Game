@@ -13,6 +13,9 @@ from torchvision import transforms
 from .dataset import HagridBBoxImageFolder
 from .model import HandGestureCNN
 
+mean = [0.485, 0.456, 0.406]
+std = [0.229, 0.224, 0.225]
+
 
 def get_dataloaders(
     data_root: str,
@@ -49,6 +52,7 @@ def get_dataloaders(
             transforms.Resize((64, 64)),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
+            transforms.Normalize(mean, std),
         ]
     )
 
@@ -56,6 +60,7 @@ def get_dataloaders(
         [
             transforms.Resize((64, 64)),
             transforms.ToTensor(),
+            transforms.Normalize(mean, std),
         ]
     )
 

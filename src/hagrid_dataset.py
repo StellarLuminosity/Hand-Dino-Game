@@ -48,6 +48,12 @@ class HagridBBoxImageFolder(Dataset):
         if not self.root.exists():
             raise FileNotFoundError(f"Dataset root '{self.root}' does not exist")
 
+        if not self.annotations:
+            raise FileNotFoundError(
+                f"No annotations found at '{annotations_path}'. "
+                "Please download them from the official repo and place here."
+            )
+
         self.annotations = self._load_annotations(annotations_path)
 
         # Discover classes (subfolders)
