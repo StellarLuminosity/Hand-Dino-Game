@@ -1,43 +1,17 @@
-# src/dataset.py
-
 import json
 from pathlib import Path
 
 from PIL import Image
 from torch.utils.data import Dataset
 
-IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+import config
+
+IMG_EXTENSIONS = config.img_extensions_torch
 
 
 class HagridBBoxImageFolder(Dataset):
     """
     Custom dataset that crops images using HaGRID bounding boxes before applying transforms.
-
-    Expected directory structure:
-      root/
-        class_0/
-          img_0.jpg
-          img_1.jpg
-          ...
-        class_1/
-          ...
-
-    annotations_path can be:
-      - A single JSON file with all annotations, or
-      - A directory containing multiple JSON files (e.g. 'hagrid_annotations/').
-        In that case, all '*.json' files are loaded recursively and merged.
-
-    HaGRID annotations format (per GitHub):
-      {
-        "image_id_without_ext": {
-          "bboxes": [[x, y, w, h], ...],          # normalized [0,1]
-          "labels": [...],
-          "united_bbox": [[x, y, w, h]] or null,
-          "united_label": [...],
-          ...
-        },
-        ...
-      }
     """
 
     def __init__(self, root, annotations_path, transform=None):
@@ -195,11 +169,10 @@ class HagridBBoxImageFolder(Dataset):
         y2 = int((y + bh) * h)
 
         # Add a small margin around the bbox
-        margin = 0.1
         box_w = max(1, x2 - x1)
         box_h = max(1, y2 - y1)
-        dx = int(box_w * margin)
-        dy = int(box_h * margin)
+        dx = int(box_w * 0.1)
+        dy = int(box_h * 0.1)
 
         x1 = max(0, x1 - dx)
         y1 = max(0, y1 - dy)

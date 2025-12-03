@@ -10,19 +10,12 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-from .dataset import HagridBBoxImageFolder
+import config
+from .hagrid_dataset import HagridBBoxImageFolder
 from .model import HandGestureCNN
 
-mean = [0.485, 0.456, 0.406]
-std = [0.229, 0.224, 0.225]
 
-
-def get_dataloaders(
-    data_root: str,
-    annotations_path: str,
-    batch_size: int = 64,
-    num_workers: int = 4,
-):
+def get_dataloaders():
     """
     Builds train and validation dataloaders from data_root/{train,val}
     using HagridBBoxImageFolder so that images are cropped with
@@ -36,7 +29,10 @@ def get_dataloaders(
       - A HaGRID annotations JSON file, or
       - A directory like 'hagrid_annotations/' containing *.json files.
     """
-    data_root = Path(data_root)
+    data_root = Path(config.data_dir)
+    annotations_path = config.annotations_path
+    batch_size = config.batch_size
+    num_workers = config.num_workers
 
     train_dir = data_root / "train"
     val_dir = data_root / "val"
@@ -49,18 +45,18 @@ def get_dataloaders(
 
     train_transform = transforms.Compose(
         [
-            transforms.Resize((64, 64)),
+            transforms.Resize(config.image_size),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
-            transforms.Normalize(mean, std),
+            transforms.Normalize(config.normalize_mean, config.normalize_std),
         ]
     )
 
     val_transform = transforms.Compose(
         [
-            transforms.Resize((64, 64)),
+            transforms.Resize(config.image_size),
             transforms.ToTensor(),
-            transforms.Normalize(mean, std),
+            transforms.Normalize(config.normalize_mean, config.normalize_std),
         ]
     )
 
@@ -148,34 +144,24 @@ def evaluate(model, loader, criterion, device):
     return epoch_loss, epoch_acc
 
 
-def train_model(
-    data_root: str,
-    annotations_path: str,
-    epochs: int = 5,
-    batch_size: int = 64,
-    lr: float = 1e-3,
-    num_workers: int = 4,
-    output_dir: str = "checkpoints",
-    device: str = "cuda",
-):
+def train_model():
     """
     Main training function that orchestrates the entire training pipeline.
     """
-    device = torch.device(device if torch.cuda.is_available() else "cpu")
+    device = config.device
+    epochs = config.epochs
+    learning_rate = config.learning_rate
+    output_dir = config.output_dir
+    
     print(f"Using device: {device}")
 
-    train_loader, val_loader, class_to_idx = get_dataloaders(
-        data_root=data_root,
-        annotations_path=annotations_path,
-        batch_size=batch_size,
-        num_workers=num_workers,
-    )
+    train_loader, val_loader, class_to_idx = get_dataloaders()
 
     num_classes = len(class_to_idx)
     model = HandGestureCNN(num_classes=num_classes).to(device)
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     os.makedirs(output_dir, exist_ok=True)
 

@@ -1,5 +1,3 @@
-import os
-import random
 import shutil
 import zipfile
 from pathlib import Path
@@ -7,19 +5,17 @@ from urllib.request import urlretrieve
 
 from kaggle.api.kaggle_api_extended import KaggleApi
 
+import config
 
-def preprocess_dataset(
-    dataset_name: str = "innominate817/hagrid-sample-30k-384p",
-    data_dir: str = "data",
-    cleanup_raw: bool = False,
-):
+
+def preprocess_dataset():
     """
     Download and preprocess the HaGRID dataset from Kaggle.
     """
-    target_classes = ["palm", "peace", "fist"]
-    split_ratios = {"train": 0.7, "test": 0.15, "val": 0.15}
-
-    data_dir = Path(data_dir)
+    dataset_name = config.dataset_name
+    data_dir = Path(config.data_dir)
+    target_classes = config.target_classes
+    split_ratios = config.split_ratios
     raw_data_dir = data_dir / "raw"
     download_dir = raw_data_dir / "hagrid-sample-30k-384p"
     annotations_dir = data_dir / "hagrid_annotations"
@@ -27,7 +23,7 @@ def preprocess_dataset(
     # Download annotations (only if not already downloaded)
     if not annotations_dir.exists():
         print("Downloading HaGRID annotations...")
-        annotations_url = "https://rndml-team-cv.obs.ru-moscow-1.hc.sbercloud.ru/datasets/hagrid_v2/annotations_with_landmarks/annotations.zip"
+        annotations_url = config.annotations_url
         annotations_zip = raw_data_dir / "annotations.zip"
 
         raw_data_dir.mkdir(parents=True, exist_ok=True)
@@ -36,21 +32,48 @@ def preprocess_dataset(
             urlretrieve(annotations_url, annotations_zip)
             print(f"Annotations downloaded to {annotations_zip}")
 
-            # Extract annotations
+            # Extract annotations to temporary location
+            temp_extract_path = raw_data_dir / "annotations_temp"
             with zipfile.ZipFile(annotations_zip, "r") as zip_ref:
-                zip_ref.extractall(raw_data_dir)
+                zip_ref.extractall(temp_extract_path)
 
-            # Move extracted annotations to final location
-            # The zip contains an "annotations" folder
-            extracted_path = raw_data_dir / "annotations"
-            if extracted_path.exists():
-                shutil.move(str(extracted_path), str(annotations_dir))
-                print(f"Annotations extracted to {annotations_dir}")
-            else:
-                print(f"[WARN] Expected 'annotations' folder after extraction")
+            # Find the actual annotations folder (might be nested)
+            extracted_path = temp_extract_path / "annotations"
+            if not extracted_path.exists():
+                # Check if annotations are directly in temp_extract_path
+                if any((temp_extract_path / "train").iterdir()):
+                    extracted_path = temp_extract_path
+                else:
+                    raise FileNotFoundError(
+                        f"Could not find annotations structure in {temp_extract_path}"
+                    )
 
-            # Clean up zip file
+            # Create final annotations directory structure
+            annotations_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Only copy JSON files for our target classes
+            for split in ["train", "val", "test"]:
+                split_src = extracted_path / split
+                split_dst = annotations_dir / split
+                
+                if split_src.exists():
+                    split_dst.mkdir(parents=True, exist_ok=True)
+                    
+                    # Copy only JSON files for target classes
+                    for cname in target_classes:
+                        json_file = split_src / f"{cname}.json"
+                        if json_file.exists():
+                            shutil.copy2(json_file, split_dst / json_file.name)
+                            print(f"  Copied {split}/{cname}.json")
+                        else:
+                            print(f"  [WARN] {split}/{cname}.json not found in annotations")
+                else:
+                    print(f"  [WARN] Split directory {split} not found in annotations")
+
+            # Clean up temporary extraction and zip file
+            shutil.rmtree(temp_extract_path)
             annotations_zip.unlink()
+            print(f"Annotations filtered and saved to {annotations_dir}")
 
         except Exception as e:
             print(f"[ERROR] Failed to download annotations: {e}")
@@ -98,17 +121,14 @@ def preprocess_dataset(
         for cname in target_classes:
             (data_dir / split / cname).mkdir(parents=True, exist_ok=True)
 
-    exts = {".jpg", ".jpeg", ".png"}
-
     def list_images(p: Path):
         files = []
         for f in p.iterdir():
-            if f.is_file() and f.suffix.lower() in exts:
+            if f.is_file() and f.suffix.lower() in config.img_extensions:
                 files.append(f)
         return files
 
     # Process each class
-    rng = random.Random(42)  # reproducible
     for class_dir in class_dirs:
         cname = class_dir.name.replace("train_val_", "")
         print(f"\nProcessing class: {cname}")
@@ -118,7 +138,6 @@ def preprocess_dataset(
             print(f"  Warning: no images in {class_dir}")
             continue
 
-        rng.shuffle(image_files)
         total = len(image_files)
         train_end = int(total * split_ratios["train"])
         test_end = train_end + int(total * split_ratios["test"])
@@ -143,7 +162,9 @@ def preprocess_dataset(
             count = len(list((data_dir / split / cname).glob("*")))
             print(f"    {cname}/ ({count} images)")
 
-    # Optional cleanup
-    if cleanup_raw and raw_data_dir.exists():
-        shutil.rmtree(raw_data_dir)
-        print("\nRaw data removed.")
+    shutil.rmtree(raw_data_dir)
+    print("\nRaw data removed.")
+
+if __name__ == "__main__":
+    preprocess_dataset()
+

@@ -4,9 +4,9 @@ import json
 
 import cv2
 import numpy as np
+import config
 
-# Classes we care about (must match your folder names under data/)
-CLASSES = ["palm", "fist", "peace"]
+CLASSES = config.target_classes
 
 
 def predict_one(img_bgr):
@@ -25,7 +25,7 @@ def predict_one(img_bgr):
     img = cv2.GaussianBlur(img_bgr, (5, 5), 0)
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-    # crude skin color range; you can tweak later for better performance
+    # crude skin color range
     lower = np.array([0, 30, 60], dtype=np.uint8)
     upper = np.array([20, 170, 255], dtype=np.uint8)
     mask = cv2.inRange(hsv, lower, upper)
@@ -50,7 +50,7 @@ def predict_one(img_bgr):
     # 3) Convex hull + defects
     hull = cv2.convexHull(contour, returnPoints=False)
     if hull is None or len(hull) < 3:
-        return "fist"  # degenerate hull → treat as closed
+        return "fist"  # degenerate hull --> treat as closed
 
     defects = cv2.convexityDefects(contour, hull)
     if defects is None:
@@ -58,8 +58,7 @@ def predict_one(img_bgr):
     else:
         num_defects = defects.shape[0]
 
-    # 4) Rule-of-thumb mapping:
-    #    more defects → more spread fingers (palm)
+    # more defects --> more spread fingers (palm)
     if num_defects >= 3:
         return "palm"   # open hand
     elif num_defects <= 1:
@@ -73,7 +72,6 @@ def eval_split(split_root: Path):
     Evaluate baseline on a folder like data/val with subfolders:
       data/val/palm, data/val/fist, data/val/peace
     """
-    exts = {".jpg", ".jpeg", ".png"}
     total = 0
     total_correct = 0
 
@@ -89,7 +87,7 @@ def eval_split(split_root: Path):
             continue
 
         for img_path in class_dir.iterdir():
-            if img_path.suffix.lower() not in exts:
+            if img_path.suffix.lower() not in config.img_extensions:
                 continue
 
             img = cv2.imread(str(img_path))
