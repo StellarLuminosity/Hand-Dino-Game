@@ -1,39 +1,64 @@
-# src/preprocess.py
-
 import os
 import random
 import shutil
+import zipfile
 from pathlib import Path
+from urllib.request import urlretrieve
 
 from kaggle.api.kaggle_api_extended import KaggleApi
 
 
 def preprocess_dataset(
     dataset_name: str = "innominate817/hagrid-sample-30k-384p",
-    target_classes: list = None,
-    split_ratios: dict = None,
     data_dir: str = "data",
     cleanup_raw: bool = False,
 ):
     """
     Download and preprocess the HaGRID dataset from Kaggle.
-
-    Args:
-        dataset_name: Kaggle dataset identifier
-        target_classes: List of gesture classes to include (default: ["palm", "peace", "fist"])
-        split_ratios: Dict with train/test/val ratios (default: {"train": 0.7, "test": 0.15, "val": 0.15})
-        data_dir: Root directory for processed data
-        cleanup_raw: If True, remove raw downloaded data after processing
     """
-    if target_classes is None:
-        target_classes = ["palm", "peace", "fist"]
-
-    if split_ratios is None:
-        split_ratios = {"train": 0.7, "test": 0.15, "val": 0.15}
+    target_classes = ["palm", "peace", "fist"]
+    split_ratios = {"train": 0.7, "test": 0.15, "val": 0.15}
 
     data_dir = Path(data_dir)
     raw_data_dir = data_dir / "raw"
     download_dir = raw_data_dir / "hagrid-sample-30k-384p"
+    annotations_dir = data_dir / "hagrid_annotations"
+
+    # Download annotations (only if not already downloaded)
+    if not annotations_dir.exists():
+        print("Downloading HaGRID annotations...")
+        annotations_url = "https://rndml-team-cv.obs.ru-moscow-1.hc.sbercloud.ru/datasets/hagrid_v2/annotations_with_landmarks/annotations.zip"
+        annotations_zip = raw_data_dir / "annotations.zip"
+
+        raw_data_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            urlretrieve(annotations_url, annotations_zip)
+            print(f"Annotations downloaded to {annotations_zip}")
+
+            # Extract annotations
+            with zipfile.ZipFile(annotations_zip, "r") as zip_ref:
+                zip_ref.extractall(raw_data_dir)
+
+            # Move extracted annotations to final location
+            # The zip contains an "annotations" folder
+            extracted_path = raw_data_dir / "annotations"
+            if extracted_path.exists():
+                shutil.move(str(extracted_path), str(annotations_dir))
+                print(f"Annotations extracted to {annotations_dir}")
+            else:
+                print(f"[WARN] Expected 'annotations' folder after extraction")
+
+            # Clean up zip file
+            annotations_zip.unlink()
+
+        except Exception as e:
+            print(f"[ERROR] Failed to download annotations: {e}")
+            print(
+                "Please download manually from the URL above and place in data/hagrid_annotations/"
+            )
+    else:
+        print(f"Annotations already exist at {annotations_dir}")
 
     # Download dataset (only if not already downloaded)
     if not download_dir.exists():

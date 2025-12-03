@@ -19,7 +19,7 @@ TARGET_CLASSES = ["palm", "peace", "fist"]
 DATA_DIR = "data"
 
 # Training config
-ANNOTATIONS_PATH = "./hagrid_annotations"  # or path to JSON file
+ANNOTATIONS_PATH = "data/hagrid_annotations"  # Downloaded by preprocess_dataset()
 EPOCHS = 10
 BATCH_SIZE = 64
 LEARNING_RATE = 1e-3
