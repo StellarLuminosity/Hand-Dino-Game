@@ -18,7 +18,7 @@ from .model import HandGestureCNN
 
 def get_dataloaders():
     """
-    Builds train and validation dataloaders
+    Builds train, validation, and test dataloaders
     """
     data_root = Path(config.data_dir)
     batch_size = config.batch_size
@@ -26,12 +26,7 @@ def get_dataloaders():
 
     train_dir = data_root / "train"
     val_dir = data_root / "val"
-
-    if not train_dir.exists() or not val_dir.exists():
-        raise FileNotFoundError(
-            f"Expected 'train' and 'val' folders under {data_root}, "
-            "but one or both do not exist. Did you run preprocess_dataset.py?"
-        )
+    test_dir = data_root / "test"
 
     train_transform = transforms.Compose(
         [
@@ -58,6 +53,10 @@ def get_dataloaders():
         root=str(val_dir),
         transform=val_transform,
     )
+    test_dataset = HagridBBoxImageFolder(
+        root=str(test_dir),
+        transform=val_transform,
+    )
 
     print("Class to index mapping:", train_dataset.class_to_idx)
 
@@ -77,7 +76,15 @@ def get_dataloaders():
         pin_memory=True,
     )
 
-    return train_loader, val_loader, train_dataset.class_to_idx
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+
+    return train_loader, val_loader, test_loader
 
 
 def train_one_epoch(model, loader, criterion, optimizer, device):
@@ -107,66 +114,40 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
     return epoch_loss, epoch_acc
 
 
-def evaluate(model, loader, criterion, device):
-    model.eval()
-    running_loss = 0.0
-    running_correct = 0
-    total = 0
-
-    with torch.no_grad():
-        for images, targets in loader:
-            images = images.to(device)
-            targets = targets.to(device)
-
-            outputs = model(images)
-            loss = criterion(outputs, targets)
-
-            running_loss += loss.item() * images.size(0)
-            _, preds = torch.max(outputs, 1)
-            running_correct += (preds == targets).sum().item()
-            total += targets.size(0)
-
-    epoch_loss = running_loss / total if total > 0 else 0.0
-    epoch_acc = running_correct / total if total > 0 else 0.0
-
-    return epoch_loss, epoch_acc
-
-
-def train_model():
-    """
-    Main training function that orchestrates the entire training pipeline.
-    """
-    device = config.device
-    epochs = config.epochs
+def train(
+    model,
+    train_loader,
+    val_loader,
+    device,
+    eval_every=1,
+    max_val_batches=None,
+):
+    num_epochs = config.epochs
     learning_rate = config.learning_rate
     output_dir = config.output_dir
 
-    print(f"Using device: {device}")
-
-    train_loader, val_loader, class_to_idx = get_dataloaders()
-
-    num_classes = len(class_to_idx)
-    model = HandGestureCNN(num_classes=num_classes).to(device)
-
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-
     os.makedirs(output_dir, exist_ok=True)
 
     best_val_acc = 0.0
+    class_to_idx = train_loader.dataset.class_to_idx
 
-    for epoch in range(1, epochs + 1):
+    for epoch in range(1, num_epochs + 1):
         start_time = time.time()
 
         train_loss, train_acc = train_one_epoch(
             model, train_loader, criterion, optimizer, device
         )
-        val_loss, val_acc = evaluate(model, val_loader, criterion, device)
+
+        val_loss, val_acc, _, _ = evaluate(
+            model, val_loader, device, max_batches=max_val_batches
+        )
 
         elapsed = time.time() - start_time
 
         print(
-            f"Epoch {epoch:02d}/{epochs} "
+            f"Epoch {epoch:02d}/{num_epochs} "
             f"- {elapsed:.1f}s | "
             f"Train loss: {train_loss:.4f}, acc: {train_acc:.3f} | "
             f"Val loss: {val_loss:.4f}, acc: {val_acc:.3f}"
@@ -187,3 +168,49 @@ def train_model():
             print(f"  -> Saved new best model to {ckpt_path}")
 
     print(f"Training complete. Best validation accuracy: {best_val_acc:.3f}")
+
+
+def evaluate(model, data_loader, device, max_batches=None):
+    model.eval()
+    criterion = nn.CrossEntropyLoss()
+
+    total = 0
+    correct = 0
+    running_loss = 0.0
+
+    num_classes = len(data_loader.dataset.classes)
+    confusion = torch.zeros(num_classes, num_classes, dtype=torch.int64)
+
+    with torch.no_grad():
+        for batch_idx, (images, targets) in enumerate(data_loader):
+            if max_batches is not None and batch_idx >= max_batches:
+                break
+
+            images = images.to(device)
+            targets = targets.to(device)
+
+            outputs = model(images)
+            loss = criterion(outputs, targets)
+
+            running_loss += loss.item() * images.size(0)
+
+            _, preds = torch.max(outputs, 1)
+            total += targets.size(0)
+            correct += (preds == targets).sum().item()
+
+            for t, p in zip(targets.view(-1), preds.view(-1)):
+                confusion[t.long(), p.long()] += 1
+
+    avg_loss = running_loss / total if total > 0 else 0.0
+    accuracy = correct / total if total > 0 else 0.0
+
+    # Per-class accuracy
+    idx_to_class = {idx: cls for cls, idx in data_loader.dataset.class_to_idx.items()}
+    per_class_acc = {}
+    for idx in range(num_classes):
+        tp = confusion[idx, idx].item()
+        total_cls = confusion[idx, :].sum().item()
+        class_name = idx_to_class[idx]
+        per_class_acc[class_name] = tp / total_cls if total_cls > 0 else 0.0
+
+    return avg_loss, accuracy, per_class_acc, confusion
