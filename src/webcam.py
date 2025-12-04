@@ -130,40 +130,29 @@ def gesture_to_action(gesture):
 #         return last_action, frame_since_action + 1
 
 
-def update_keys_for_action(action, key_state, in_jump_lock):
+def update_keys_for_action(action, last_jump_time):
     """
     Treat gestures as held keys:
       - 'jump' -> hold UP
       - 'duck' -> hold DOWN
       - 'idle' -> release both
     """
-    # Jump handling
+    now = time.time()
+    in_jump_lock = (now - last_jump_time) < config.jump_lock_duration
+
     if action == "jump" and not in_jump_lock:
-        if not key_state["jump_held"]:
-            pyautogui.keyDown("up")
-            key_state["jump_held"] = True
-        if key_state["duck_held"]:
-            pyautogui.keyUp("down")
-            key_state["duck_held"] = False
+        pyautogui.press("space")
+        print("[ACTION] JUMP")
+        last_jump_time = now
 
-    # Duck handling
     elif action == "duck" and not in_jump_lock:
-        if not key_state["duck_held"]:
-            pyautogui.keyDown("down")
-            key_state["duck_held"] = True
-        # while ducking, don't hold jump
-        if key_state["jump_held"]:
-            pyautogui.keyUp("up")
-            key_state["jump_held"] = False
+        pyautogui.keyDown("down")
+        time.sleep(0.05)
+        pyautogui.keyUp("down")
+        print("[ACTION] DUCK")
 
-    # Idle: release both
-    else:
-        if key_state["jump_held"]:
-            pyautogui.keyUp("up")
-            key_state["jump_held"] = False
-        if key_state["duck_held"]:
-            pyautogui.keyUp("down")
-            key_state["duck_held"] = False
+    # 'idle' or anything during jump lock --> do nothing
+    return last_jump_time
 
 
 def maybe_save_frame(crop_bgr, gesture, out_root):
@@ -242,10 +231,6 @@ def main():
     last_jump_time = 0.0
     frame_count = 0
 
-    key_state = {
-        "jump_held": False,
-        "duck_held": False,
-    }
     custom_root = Path("data/custom_test")
 
     print("Entering main processing loop...")
@@ -324,8 +309,6 @@ def main():
             )
 
         # Map to action and maybe send key
-        now = time.time()
-        in_jump_lock = (now - last_jump_time) < config.jump_lock_duration
         action = gesture_to_action(smooth_gesture)
         if action != last_action:
             print(
@@ -339,7 +322,7 @@ def main():
         else:
             action = "idle"
 
-        update_keys_for_action(action, key_state, in_jump_lock)
+        last_jump_time = update_keys_for_action(action, last_jump_time)
 
         # Overlay prediction on frame
         text = f"pred: {smooth_gesture} (raw: {gesture})"

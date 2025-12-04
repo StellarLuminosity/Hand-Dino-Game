@@ -31,4 +31,4 @@ normalize_std = [0.229, 0.224, 0.225]
 image_size = (64, 64)
 
 # inference config
-jump_lock_duration = 1.3  # in seconds
+jump_lock_duration = 0.9  # in seconds
