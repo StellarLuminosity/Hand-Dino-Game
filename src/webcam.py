@@ -12,6 +12,7 @@ from PIL import Image
 from torchvision import transforms
 
 import config
+
 from .model import HandGestureCNN
 
 
@@ -19,8 +20,7 @@ def load_model():
     ckpt_path = os.path.join(config.model_dir, "best_model.pt")
     if not os.path.exists(ckpt_path):
         raise FileNotFoundError(
-            f"Checkpoint not found at {ckpt_path}. "
-            "Run training (main.py) first."
+            f"Checkpoint not found at {ckpt_path}. " "Run training (main.py) first."
         )
 
     ckpt = torch.load(ckpt_path, map_location=config.device)
@@ -117,13 +117,13 @@ def send_key_for_action(action, last_action, cooldown_frames, frame_since_action
 
     if action == "jump":
         pyautogui.press("space")
-        print("[ACTION] JUMP")
+        print("JUMP")
         return action, 0
     elif action == "duck":
         pyautogui.keyDown("down")
         time.sleep(0.05)
         pyautogui.keyUp("down")
-        print("[ACTION] DUCK")
+        print("DUCK")
         return action, 0
     else:
         # idle: do nothing
@@ -143,10 +143,11 @@ def maybe_save_frame(crop_bgr, gesture, out_root):
     ts = int(time.time() * 1000)
     fname = class_dir / f"{gesture}_{ts}.jpg"
     cv2.imwrite(str(fname), crop_bgr)
-    print(f"[SAVE] Saved frame to {fname}")
+    print(f"Saved frame to {fname}")
 
 
 def main():
+    print("Starting Hand Dino webcam application...")
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--camera", type=int, default=0, help="Webcam index (default: 0)"
@@ -170,27 +171,45 @@ def main():
     )
     args = parser.parse_args()
 
-    device = config.device
-    model, class_to_idx, idx_to_class = load_model(device)
+    print(f"Camera index: {args.camera}")
+    print(f"History size: {args.history}")
+    print(f"Cooldown frames: {args.cooldown}")
+    print(f"Save custom frames: {args.save_custom}")
+    print(f"Device: {config.device}")
 
-    # Fixed ROI in the middle of the frame (tweak as needed)
-    # We'll compute ROI after reading the first frame to know width/height.
+    print("Loading model...")
+    device = config.device
+    model, class_to_idx, idx_to_class = load_model()
+    print(f"Model loaded successfully!")
+
     roi = None
 
+    print(f"Attempting to open camera {args.camera}...")
     cap = cv2.VideoCapture(args.camera)
     if not cap.isOpened():
         raise RuntimeError("Could not open webcam. Check camera index.")
 
-    print("Press 'q' to quit.")
-    print("Press 's' to save current ROI frame (if --save_custom is set).")
+    # Get camera properties
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    print(f"Camera opened successfully! Resolution: {width}x{height}, FPS: {fps}")
+
+    print("\nPress 'q' to quit.")
+    if args.save_custom:
+        print("Press 's' to save current ROI frame.")
+    print("Starting main loop...\n")
 
     pred_history = deque(maxlen=args.history)
     last_action = "idle"
     frames_since_action = 0
+    frame_count = 0
 
     custom_root = Path("data/custom_test")
 
+    print("Entering main processing loop...")
     while True:
+        frame_count += 1
         ret, frame = cap.read()
         if not ret:
             print("Failed to read frame from camera.")
@@ -206,6 +225,7 @@ def main():
             x2 = x1 + size
             y2 = y1 + size
             roi = (x1, y1, x2, y2)
+            print(f"Initialized ROI: ({x1}, {y1}) to ({x2}, {y2}), size: {size}x{size}")
 
         # Draw ROI rectangle for user guidance
         x1, y1, x2, y2 = roi
@@ -214,6 +234,8 @@ def main():
         # Preprocess ROI for model
         result = preprocess_frame(frame, roi)
         if result is None:
+            if frame_count % 30 == 0:  # Print every 30 frames to avoid spam
+                print(f"Frame {frame_count}: Empty ROI crop, skipping inference")
             cv2.imshow("Hand Dino - CNN", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
@@ -231,8 +253,20 @@ def main():
         pred_history.append(gesture)
         smooth_gesture = majority_vote(pred_history)
 
+        # Print prediction info periodically or when it changes
+        if frame_count % 30 == 0 or smooth_gesture != (
+            pred_history[-2] if len(pred_history) > 1 else None
+        ):
+            print(
+                f"Frame {frame_count}: Raw={gesture}, Smoothed={smooth_gesture}, History={list(pred_history)}"
+            )
+
         # Map to action and maybe send key
         action = gesture_to_action(smooth_gesture)
+        if action != last_action:
+            print(
+                f"Gesture '{smooth_gesture}' -> Action '{action}' (was '{last_action}')"
+            )
         last_action, frames_since_action = send_key_for_action(
             action, last_action, args.cooldown, frames_since_action
         )
@@ -254,12 +288,18 @@ def main():
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
+            print(f"\nQuit requested. Processed {frame_count} frames total.")
             break
         if key == ord("s") and args.save_custom:
             maybe_save_frame(crop_bgr, smooth_gesture, custom_root)
+        elif key == ord("s") and not args.save_custom:
+            print(
+                "'s' pressed but --save_custom not enabled. Enable with --save_custom flag."
+            )
 
     cap.release()
     cv2.destroyAllWindows()
+    print("Done. Exiting.")
 
 
 if __name__ == "__main__":
