@@ -37,11 +37,14 @@ def main():
         max_val_batches=None,
     )
 
-    print("Final evaluation...")
-    model = HandGestureCNN(num_classes=num_classes).to(device) # re-initialize model so that we can evaluate the best one
+    model = HandGestureCNN(num_classes=num_classes).to(device) # re-initialize model so that we evaluate the best saved one
     ckpt_path = os.path.join(config.output_dir, "best_model.pt")
     ckpt = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(ckpt["model_state_dict"])
+
+    # -----------------------------
+    # Final evaluation: CNN model
+    # -----------------------------
     test_loss, test_acc, per_class_acc, confusion = evaluate(
         model, test_loader, device, max_batches=None
     )
@@ -60,12 +63,32 @@ def main():
     cnn_metrics_path = Path(config.cnn_metrics_output)
     cnn_metrics_path.parent.mkdir(parents=True, exist_ok=True)
     cnn_metrics_path.write_text(json.dumps(cnn_metrics, indent=2), encoding="utf-8")
-    print(f"\nSaved CNN metrics to {cnn_metrics_path}")
 
-    # Baseline evaluation
+    print("\n=== CNN evaluation on: data/test ===")
+    print(f"Test loss: {test_loss:.4f}, accuracy: {test_acc:.3f}")
+    print("Per-class accuracy:")
+    for cls_name, acc in per_class_acc.items():
+        print(f"  {cls_name:>5}: {acc:.3f}")
+    print(f"CNN metrics saved to: {cnn_metrics_path}")
+
+    # -----------------------------------
+    # Final evaluation: OpenCV baseline
+    # -----------------------------------
     split_root = Path(config.data_dir) / "test"
     overall_acc, per_class = eval_split(split_root)
-    save_metrics_json(overall_acc, per_class, Path(config.metrics_output))
+
+    baseline_metrics_path = Path(config.metrics_output)
+    baseline_metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    save_metrics_json(overall_acc, per_class, baseline_metrics_path)
+
+    print("\n=== OpenCV baseline evaluation on: data/test ===")
+    print(f"Overall accuracy: {overall_acc:.3f}")
+    for cls_name, stats in per_class.items():
+        correct = stats["correct"]
+        total = stats["total"]
+        acc = correct / total if total > 0 else 0.0
+        print(f"  {cls_name:>5}: {acc:.3f} ({correct}/{total})")
+    print(f"Baseline metrics saved to: {baseline_metrics_path}")
 
 
 if __name__ == "__main__":

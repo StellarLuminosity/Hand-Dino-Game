@@ -21,6 +21,8 @@ learning_rate = 1e-3
 num_workers = 4
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 output_dir = "checkpoints"
+model_dir = "models"
+cnn_metrics_output = "figs/cnn_metrics.json"
 metrics_output = "figs/baseline_metrics.json"
 
 # Image preprocessing
