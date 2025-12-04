@@ -106,28 +106,64 @@ def gesture_to_action(gesture):
         return "idle"
 
 
-def send_key_for_action(action, last_action, cooldown_frames, frame_since_action):
-    """
-    Send pyautogui keypresses based on action.
-    Uses a cooldown so that keys aren't spammed every frame
-    """
-    # Only trigger if action changed and cooldown has passed
-    if action == last_action and frame_since_action < cooldown_frames:
-        return last_action, frame_since_action + 1
+# def send_key_for_action(action, last_action, cooldown_frames, frame_since_action):
+#     """
+#     Send pyautogui keypresses based on action.
+#     Uses a cooldown so that keys aren't spammed every frame
+#     """
+#     # Only trigger if action changed and cooldown has passed
+#     if action == last_action and frame_since_action < cooldown_frames:
+#         return last_action, frame_since_action + 1
+#
+#     if action == "jump":
+#         pyautogui.press("space")
+#         print("JUMP")
+#         return action, 0
+#     elif action == "duck":
+#         pyautogui.keyDown("down")
+#         time.sleep(0.05)
+#         pyautogui.keyUp("down")
+#         print("DUCK")
+#         return action, 0
+#     else:
+#         # idle: do nothing
+#         return last_action, frame_since_action + 1
 
-    if action == "jump":
-        pyautogui.press("space")
-        print("JUMP")
-        return action, 0
-    elif action == "duck":
-        pyautogui.keyDown("down")
-        time.sleep(0.05)
-        pyautogui.keyUp("down")
-        print("DUCK")
-        return action, 0
+
+def update_keys_for_action(action, key_state, in_jump_lock):
+    """
+    Treat gestures as held keys:
+      - 'jump' -> hold UP
+      - 'duck' -> hold DOWN
+      - 'idle' -> release both
+    """
+    # Jump handling
+    if action == "jump" and not in_jump_lock:
+        if not key_state["jump_held"]:
+            pyautogui.keyDown("up")
+            key_state["jump_held"] = True
+        if key_state["duck_held"]:
+            pyautogui.keyUp("down")
+            key_state["duck_held"] = False
+
+    # Duck handling
+    elif action == "duck" and not in_jump_lock:
+        if not key_state["duck_held"]:
+            pyautogui.keyDown("down")
+            key_state["duck_held"] = True
+        # while ducking, don't hold jump
+        if key_state["jump_held"]:
+            pyautogui.keyUp("up")
+            key_state["jump_held"] = False
+
+    # Idle: release both
     else:
-        # idle: do nothing
-        return last_action, frame_since_action + 1
+        if key_state["jump_held"]:
+            pyautogui.keyUp("up")
+            key_state["jump_held"] = False
+        if key_state["duck_held"]:
+            pyautogui.keyUp("down")
+            key_state["duck_held"] = False
 
 
 def maybe_save_frame(crop_bgr, gesture, out_root):
@@ -203,8 +239,13 @@ def main():
     pred_history = deque(maxlen=args.history)
     last_action = "idle"
     frames_since_action = 0
+    last_jump_time = 0.0
     frame_count = 0
 
+    key_state = {
+        "jump_held": False,
+        "duck_held": False,
+    }
     custom_root = Path("data/custom_test")
 
     print("Entering main processing loop...")
@@ -218,14 +259,18 @@ def main():
         h, w, _ = frame.shape
 
         if roi is None:
-            # Define a square ROI roughly in the center of the frame
-            size = min(w, h) // 2
-            x1 = w // 2 - size // 2
-            y1 = h // 2 - size // 2
-            x2 = x1 + size
-            y2 = y1 + size
+            roi_width = int(0.25 * w)
+            roi_height = int(0.35 * h)
+
+            center_x = w // 2
+            center_y = int(h * 0.65)  # a bit below center
+
+            x1 = max(center_x - roi_width // 2, 0)
+            y1 = max(center_y - roi_height // 2, 0)
+            x2 = min(center_x + roi_width // 2, w)
+            y2 = min(center_y + roi_height // 2, h)
             roi = (x1, y1, x2, y2)
-            print(f"Initialized ROI: ({x1}, {y1}) to ({x2}, {y2}), size: {size}x{size}")
+            print(f"Initialized ROI: ({x1}, {y1}) to ({x2}, {y2})")
 
         # Draw ROI rectangle for user guidance
         x1, y1, x2, y2 = roi
@@ -242,13 +287,30 @@ def main():
             continue
 
         tensor, crop_bgr = result
+        cv2.imshow("ROI", crop_bgr)
         tensor = tensor.to(device)
 
         # Model inference
         with torch.no_grad():
             logits = model(tensor)
-            pred_idx = int(logits.argmax(dim=1).item())
+            probs = torch.softmax(logits, dim=1)[0].cpu().numpy()
+            pred_idx = int(probs.argmax())
             gesture = idx_to_class.get(pred_idx, None)
+
+        # Debug: show probabilities on screen
+        prob_text = " ".join(
+            f"{idx_to_class[i]}:{probs[i]:.2f}" for i in range(len(idx_to_class))
+        )
+        cv2.putText(
+            frame,
+            prob_text,
+            (10, 60),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
 
         pred_history.append(gesture)
         smooth_gesture = majority_vote(pred_history)
@@ -262,14 +324,22 @@ def main():
             )
 
         # Map to action and maybe send key
+        now = time.time()
+        in_jump_lock = (now - last_jump_time) < config.jump_lock_duration
         action = gesture_to_action(smooth_gesture)
         if action != last_action:
             print(
                 f"Gesture '{smooth_gesture}' -> Action '{action}' (was '{last_action}')"
             )
-        last_action, frames_since_action = send_key_for_action(
-            action, last_action, args.cooldown, frames_since_action
-        )
+
+        if smooth_gesture == "fist":
+            action = "jump"
+        elif smooth_gesture == "peace":
+            action = "duck"
+        else:
+            action = "idle"
+
+        update_keys_for_action(action, key_state, in_jump_lock)
 
         # Overlay prediction on frame
         text = f"pred: {smooth_gesture} (raw: {gesture})"
